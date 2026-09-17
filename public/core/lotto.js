@@ -357,27 +357,81 @@ function longestArithmetic(s) {
 // ───────────────────────── 생성 ─────────────────────────
 
 export const STRATEGIES = {
-  mixed: { label: "혼합", desc: "안 나온 번호 + 비인기 번호를 함께 반영" },
-  cold: { label: "안 나온 번호", desc: "기대보다 적게 나온 번호일수록 자주 뽑음" },
+  cold: { label: "안 나온 번호", desc: "기대보다 적게 나온 번호 우선, 출현 횟수가 같으면 비인기 번호 먼저" },
+  jackpot: { label: "1등 집중", desc: "가장 안 나온 번호 몇 개만 후보로 두고, 그 안에서 겹치는 조합을 만듦" },
   unpopular: { label: "비인기 번호", desc: "다른 사람이 덜 고르는 번호 위주 → 당첨 시 나눠 갖는 사람이 적음" },
   random: { label: "완전 무작위", desc: "모든 번호를 같은 확률로" },
 };
+/** 없어진 전략 이름으로 저장된 설정을 받아 준다. */
+export const STRATEGY_ALIAS = { mixed: "cold" };
+
+/**
+ * 인기도를 '후순위'로 만드는 축소 계수.
+ * 출현 횟수가 같은 번호끼리 순서를 가르는 데만 쓰이도록, 인기도 점수 전체 폭이
+ * 출현 1회 차이(z로 1/sd)보다 작아지게 눌러서 더한다.
+ */
+const TIE_MARGIN = 0.9;
+export function tieBreakScale(freq, popularity) {
+  if (!popularity) return 0;
+  const u = NUMBERS.map((n) => -popularity.coef[n] / popularity.sd);
+  const span = Math.max(...u) - Math.min(...u);
+  return span > 0 ? (TIE_MARGIN * (1 / freq.sd)) / span : 0;
+}
+
+/** 번호별 점수(인덱스 1..45). 클수록 먼저 뽑힌다. */
+export function numberScores({ strategy, freq, popularity }) {
+  const tie = tieBreakScale(freq, popularity);
+  const s = new Float64Array(MAX + 1);
+  for (const { n, z } of freq.rows) {
+    const unpop = popularity ? -popularity.coef[n] / popularity.sd : 0;
+    s[n] = { random: 0, cold: -z + tie * unpop, jackpot: -z + tie * unpop, unpopular: unpop }[strategy];
+  }
+  return s;
+}
 
 /** 번호별 뽑힘 가중치(인덱스 1..45). strength 0이면 균등. */
 export function buildWeights({ strategy, freq, popularity, strength = 0.6 }) {
+  const scores = numberScores({ strategy, freq, popularity });
   const w = new Float64Array(MAX + 1);
-  for (const { n, z } of freq.rows) {
-    const cold = -z; // 덜 나왔을수록 큼
-    const unpop = popularity ? -popularity.coef[n] / popularity.sd : 0;
-    const score = {
-      random: 0,
-      cold,
-      unpopular: unpop,
-      mixed: (cold + unpop) / 2,
-    }[strategy];
-    w[n] = Math.exp(strength * score);
-  }
+  for (const n of NUMBERS) w[n] = Math.exp(strength * scores[n]);
   return w;
+}
+
+// ───────────────────────── 1등 집중 ─────────────────────────
+
+/** 조합 수 C(n, k) */
+export function choose(n, k) {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
+  return Math.round(r);
+}
+
+/**
+ * '1등 집중'의 후보 번호 묶음. 가장 덜 나온 번호부터 size개.
+ * @param {number[]} [o.include]  반드시 넣을 번호(고정수)
+ * @param {number[]} [o.exclude]  뺄 번호
+ */
+export function coldPool(freq, { size = 8, popularity = null, include = [], exclude = [] } = {}) {
+  if (size < PICK) throw new Error(`후보는 최소 ${PICK}개여야 합니다.`);
+  const scores = numberScores({ strategy: "cold", freq, popularity });
+  const drop = new Set(exclude);
+  const pool = include.filter((n) => !drop.has(n));
+  const rest = NUMBERS.filter((n) => !drop.has(n) && !pool.includes(n)).sort((a, b) => scores[b] - scores[a] || a - b);
+  pool.push(...rest.slice(0, Math.max(0, size - pool.length)));
+  if (pool.length < PICK) throw new Error("후보로 쓸 번호가 부족합니다. 제외수를 줄여 주세요.");
+  return pool.sort((a, b) => a - b);
+}
+
+/**
+ * 후보 size개 안에서 count게임을 살 때의 확률.
+ * combos = 후보에서 만들 수 있는 조합 수, poolHit = 당첨번호 6개가 모두 후보 안에 들 확률,
+ * coverage = 그 경우 내가 산 게임이 정답일 확률. 둘을 곱하면 결국 count / 8,145,060 으로 무작위와 같다.
+ */
+export function jackpotOdds({ poolSize, count }) {
+  const combos = choose(poolSize, PICK);
+  const bought = Math.min(count, combos);
+  return { combos, bought, poolHit: combos / TOTAL_COMBOS, coverage: bought / combos, jackpot: bought / TOTAL_COMBOS };
 }
 
 export function randomCombo(rng) {

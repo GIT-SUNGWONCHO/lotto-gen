@@ -6,7 +6,8 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const num = new Intl.NumberFormat("ko-KR");
 const SAVE_KEY = "lotto-gen:saved";
 const PREF_KEY = "lotto-gen:prefs";
-const STRATEGY_ORDER = ["mixed", "cold", "unpopular", "random"];
+const STRATEGY_ORDER = ["cold", "jackpot", "unpopular", "random"];
+const DEFAULT_STRATEGY = "cold";
 const FLAG_SHORT = { pastFirst: "역대 1등 조합", run3: "3연속", birthday: "생일 조합", slipLine: "용지 일직선", arith: "등차수열", sameEnding: "끝수 반복" };
 
 const state = {
@@ -187,7 +188,7 @@ function renderActiveTab() {
 function buildControls() {
   $("#strategies").innerHTML = STRATEGY_ORDER.map((id) => {
     const s = L.STRATEGIES[id];
-    const badge = id === "mixed" ? '<span class="badge">기본</span>' : "";
+    const badge = id === DEFAULT_STRATEGY ? '<span class="badge">기본</span>' : "";
     return `<label class="strategy"><input type="radio" name="strategy" value="${id}"><b>${s.label}${badge}</b><small>${s.desc}</small></label>`;
   }).join("");
   $("#filters").innerHTML = L.FILTERS.map(
@@ -197,9 +198,11 @@ function buildControls() {
 
   const prefs = store.get(PREF_KEY, {});
   const form = $("#genForm");
-  form.strategy.value = prefs.strategy ?? "mixed";
+  const saved = L.STRATEGY_ALIAS[prefs.strategy] ?? prefs.strategy;
+  form.strategy.value = STRATEGY_ORDER.includes(saved) ? saved : DEFAULT_STRATEGY;
   form.window.value = String(prefs.window ?? 0);
   form.count.value = String(prefs.count ?? 5);
+  form.poolSize.value = String(prefs.poolSize ?? 8);
   form.strength.value = String(prefs.strength ?? 0.6);
   form.spread.checked = prefs.spread ?? true;
   const filters = new Set(prefs.filters ?? L.FILTERS.map((f) => f.id));
@@ -241,6 +244,7 @@ function formValues() {
     strategy: form.strategy.value,
     window: Number(form.window.value),
     count: Number(form.count.value),
+    poolSize: Number(form.poolSize.value),
     strength: Number(form.strength.value),
     spread: form.spread.checked,
     filters: $$('input[name="filter"]:checked', form).map((c) => c.value),
@@ -250,9 +254,21 @@ function formValues() {
 function syncControls() {
   const v = formValues();
   const form = $("#genForm");
+  const jackpot = v.strategy === "jackpot";
   form.strengthOut.value = v.strength.toFixed(1);
-  $("#windowField").hidden = !["cold", "mixed"].includes(v.strategy);
-  $("#strengthField").hidden = v.strategy === "random";
+  $("#windowField").hidden = !["cold", "jackpot"].includes(v.strategy);
+  $("#poolField").hidden = !jackpot;
+  $("#strengthField").hidden = jackpot || v.strategy === "random";
+  $("#spreadField").hidden = jackpot; // 1등 집중은 겹치게 만드는 것이 목적
+  $("#jackpotNote").hidden = !jackpot;
+  if (jackpot) {
+    const o = L.jackpotOdds({ poolSize: v.poolSize, count: v.count });
+    $("#jackpotNote").innerHTML =
+      `후보 ${v.poolSize}개로 만들 수 있는 조합은 <b>${num.format(o.combos)}가지</b>입니다. ` +
+      `당첨번호 6개가 모두 이 후보 안에서 나올 확률은 <b>1 / ${num.format(Math.round(1 / o.poolHit))}</b>, ` +
+      `그때 ${o.bought}게임 중 정답이 있을 확률이 <b>${o.bought} / ${num.format(o.combos)}</b>(${pct(o.coverage, 1)})입니다. ` +
+      `곱하면 1등 확률은 <b>${o.bought} / 8,145,060</b> — 번호를 어떻게 고르든 같습니다.`;
+  }
 }
 
 function savePrefs() {
@@ -278,10 +294,17 @@ function onGenerate(e) {
   if (!state.draws.length) return toast("데이터를 아직 불러오지 못했습니다.");
   const v = formValues();
   const f = freq(v.window);
-  const weights = L.buildWeights({ strategy: v.strategy, freq: f, popularity: state.popularity, strength: v.strength });
   const fixed = [...state.pick].filter(([, s]) => s === "fixed").map(([n]) => n);
   const excluded = [...state.pick].filter(([, s]) => s === "excluded").map(([n]) => n);
+  const jackpot = v.strategy === "jackpot";
+  let pool = null;
   try {
+    // 1등 집중: 후보 밖 번호의 가중치를 0으로 만들고, 게임끼리 겹치는 것을 허용한다.
+    let weights = L.buildWeights({ strategy: v.strategy, freq: f, popularity: state.popularity, strength: v.strength });
+    if (jackpot) {
+      pool = L.coldPool(f, { size: v.poolSize, popularity: state.popularity, include: fixed, exclude: excluded });
+      weights = Float64Array.from({ length: L.MAX + 1 }, (_, n) => (pool.includes(n) ? 1 : 0));
+    }
     state.tickets = L.generateTickets({
       count: v.count,
       weights,
@@ -289,21 +312,30 @@ function onGenerate(e) {
       fixed,
       excluded,
       filters: v.filters,
-      maxOverlap: v.spread ? 2 : null,
-      spread: v.spread,
+      maxOverlap: jackpot || !v.spread ? null : 2,
+      spread: jackpot || v.spread,
       pastKeys: state.pastKeys,
     });
   } catch (err) {
     return toast(err.message);
   }
-  state.ticketMeta = { round: L.nextDraw(state.draws).round, strategy: v.strategy, freq: f };
+  state.ticketMeta = { round: L.nextDraw(state.draws).round, strategy: v.strategy, freq: f, pool, count: v.count };
   renderTickets();
 }
 
 function renderTickets() {
-  const { round, strategy, freq: f } = state.ticketMeta;
+  const { round, strategy, freq: f, pool } = state.ticketMeta;
   const zOf = new Map(f.rows.map((r) => [r.n, r.z]));
   $("#resultTitle").textContent = `${round}회 추천 번호 · ${L.STRATEGIES[strategy].label}`;
+  const poolBox = $("#poolInfo");
+  poolBox.hidden = !pool;
+  if (pool) {
+    const counts = new Map(pool.map((n) => [n, state.tickets.filter((t) => t.numbers.includes(n)).length]));
+    poolBox.innerHTML =
+      `<span class="eyebrow">후보 ${pool.length}개 — 가장 덜 나온 번호</span>
+       <div class="balls">${pool.map((n) => ball(n, "sm")).join("")}</div>
+       <p class="muted small">각 번호가 들어간 게임 수: ${pool.map((n) => `${n}번 ${counts.get(n)}장`).join(" · ")}</p>`;
+  }
   $("#tickets").innerHTML = state.tickets
     .map((t, i) => {
       const chips = [];
@@ -333,6 +365,7 @@ function renderTickets() {
 function renderOdds() {
   const box = $("#odds");
   const nums = state.tickets.map((t) => t.numbers);
+  const { pool, count } = state.ticketMeta;
   const token = ++state.oddsToken;
   box.hidden = false;
   box.innerHTML = '<span class="muted">당첨 확률 계산 중…</span>';
@@ -340,12 +373,19 @@ function renderOdds() {
     if (token !== state.oddsToken) return;
     const p = L.atLeastOneWinProbability(nums);
     const n = nums.length;
-    const compare =
-      n > 1
-        ? `같은 번호로 ${n}게임을 사면 ${pct(L.independentWinProbability(1))}에 그칩니다. `
-        : "";
+    const spreadP = L.independentWinProbability(n);
+    let note;
+    if (pool) {
+      const o = L.jackpotOdds({ poolSize: pool.length, count });
+      note =
+        `번호를 후보 ${pool.length}개에 몰았기 때문에 5등 이상 확률은 겹치지 않게 퍼뜨렸을 때(약 ${pct(spreadP, 1)})보다 낮습니다. ` +
+        `대신 후보가 맞아떨어지는 회차에는 여러 장이 한꺼번에 당첨됩니다. ` +
+        `1등 확률은 <b>1/${num.format(Math.round(1 / o.poolHit))} × ${o.bought}/${num.format(o.combos)} = ${n} / 8,145,060</b>으로 다른 방식과 같습니다.`;
+    } else {
+      note = `${n > 1 ? `같은 번호로 ${n}게임을 사면 ${pct(L.independentWinProbability(1))}에 그칩니다. ` : ""}1등 확률은 어떤 번호든 게임당 1 / 8,145,060으로 같습니다.`;
+    }
     box.innerHTML = `${n > 1 ? `이 ${n}게임 중 <b>적어도 한 게임이 5등 이상</b>` : "이 게임이 <b>5등 이상</b>"}일 확률
-      <strong>${pct(p)}</strong><br><span class="muted">${compare}1등 확률은 어떤 번호든 게임당 1 / 8,145,060으로 같습니다.</span>`;
+      <strong>${pct(p)}</strong><br><span class="muted">${note}</span>`;
   }, 30);
 }
 
@@ -564,6 +604,8 @@ function renderBacktest() {
 
 // ───────────── 확률 이야기 ─────────────
 
+const JACKPOT_DEMO = { pool: 8, count: 5, odds: L.jackpotOdds({ poolSize: 8, count: 5 }) };
+
 function renderStory() {
   const f = freq(0);
   const R = f.rounds;
@@ -605,14 +647,28 @@ function renderStory() {
     <h2>4. 실제로 효과가 있는 것 ② 여러 게임이면 번호를 겹치지 않게</h2>
     <p>5게임을 산다면 1등 확률은 어떻게 사든 5 / 8,145,060입니다. 하지만 <b>'적어도 하나는 당첨'</b>될 확률은 번호 배치에 따라 달라집니다. 같은 번호 5장은 ${pct(same5)}, 번호를 고르게 퍼뜨린 5장은 약 ${pct(L.independentWinProbability(5), 1)}입니다. 이 앱은 게임끼리 겹치는 번호를 2개로 제한하고 정확한 확률을 계산해서 보여 줍니다.</p>
 
-    <h2>5. 냉정한 기대값</h2>
+    <h2>5. '1등 집중' 전략은 무엇을 바꾸나</h2>
+    <p>가장 안 나온 번호 ${JACKPOT_DEMO.pool}개만 후보로 두고 그 안에서 ${JACKPOT_DEMO.count}게임을 만드는 방식입니다. 계산해 보면 이렇습니다.</p>
+    <div class="table-wrap">${table(
+      ["", "값", "뜻"],
+      [
+        ["후보로 만들 수 있는 조합", `${num.format(JACKPOT_DEMO.odds.combos)}가지`, `${JACKPOT_DEMO.pool}개 중 6개를 뽑는 경우의 수`],
+        ["당첨번호가 모두 후보 안에 들 확률", `1 / ${num.format(Math.round(1 / JACKPOT_DEMO.odds.poolHit))}`, `${num.format(JACKPOT_DEMO.odds.combos)} ÷ 8,145,060`],
+        [`그때 내 ${JACKPOT_DEMO.count}게임에 정답이 있을 확률`, `${JACKPOT_DEMO.count} / ${num.format(JACKPOT_DEMO.odds.combos)}`, pct(JACKPOT_DEMO.odds.coverage, 1)],
+        ["1등 확률", `${JACKPOT_DEMO.count} / 8,145,060`, "두 값을 곱한 결과 <b>— 무작위와 같음</b>"],
+      ],
+    )}</div>
+    <p>바뀌는 것은 <b>결과의 모양</b>입니다. 번호가 겹치다 보니 5등 이상이 하나라도 나올 확률은 오히려 낮아지고(퍼뜨린 5장 ${pct(L.independentWinProbability(5), 1)} → 후보 ${JACKPOT_DEMO.pool}개에 몰면 그보다 아래), 대신 후보가 맞아떨어지는 회차에는 여러 장이 한꺼번에 당첨됩니다. 확률을 올리는 방법이 아니라, <b>적게 자주 맞기</b>와 <b>크게 드물게 맞기</b> 중에서 고르는 문제입니다.</p>
+
+    <h2>6. 냉정한 기대값</h2>
     <p>판매액의 약 50%가 당첨금으로 돌아갑니다. 1,000원어치를 사면 평균 약 500원이 돌아온다는 뜻이고, 어떤 전략도 이 사실을 뒤집지 못합니다. 이 앱이 할 수 있는 일은 <b>같은 운이 따랐을 때 조금 더 많이 받도록</b> 번호를 고르는 것까지입니다. 즐길 만큼만 구매하세요.</p>
 
     <h2>이 앱의 계산 방법</h2>
     <ul>
-      <li><b>안 나온 번호:</b> 번호별 z = (출현 − 기대) ÷ 표준편차, 가중치 = e<sup>−강도 × z</sup></li>
+      <li><b>안 나온 번호(기본):</b> 번호별 z = (출현 − 기대) ÷ 표준편차, 가중치 = e<sup>−강도 × z</sup></li>
+      <li><b>인기도는 후순위:</b> 출현 횟수가 같은 번호끼리 순서를 가르는 데만 씁니다. 인기도 점수 전체 폭이 출현 1회 차이보다 작아지도록 눌러서 더하므로, 덜 나온 번호를 인기도가 앞지르지 못합니다.</li>
       <li><b>비인기 번호:</b> log(실제 당첨자 ÷ 무작위 기대 당첨자)를 4·5등에 대해 구해 당첨번호 45개에 릿지 회귀 → 번호별 인기도 계수, 가중치 = e<sup>−강도 × 인기도/표준편차</sup></li>
-      <li><b>혼합:</b> 두 점수의 평균</li>
+      <li><b>1등 집중:</b> 위 점수 상위 N개만 후보로 두고 그 안에서만 조합을 만듭니다. 겹침 제한을 풀고, 후보 번호가 고르게 들어가도록 이미 쓴 번호의 가중치를 절반씩 낮춥니다.</li>
       <li><b>패턴 필터:</b> 역대 1등 조합, 3연속, 생일 조합, 용지 일직선, 등차수열, 같은 끝수를 뺍니다</li>
       <li><b>균등성 검정:</b> 한 회차에 6개를 비복원 추출하므로 카이제곱 통계량에 44/39를 곱해 보정합니다</li>
     </ul>`;
