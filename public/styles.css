@@ -212,6 +212,13 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .odds { margin-top: 14px; padding: 14px; border-radius: 10px; background: var(--surface-2); font-size: 0.88rem; }
 .odds strong { font-size: 1.05rem; }
 
+/* 1등 집중: 후보 번호 묶음 */
+.pool { padding: 12px 14px; margin-bottom: 12px; border-radius: 10px; background: var(--accent-wash); }
+.pool .eyebrow { margin-bottom: 6px; }
+.pool .balls { display: flex; flex-wrap: wrap; gap: 6px; }
+.pool p { margin: 8px 0 0; }
+.note { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--accent-wash); color: var(--ink-2); line-height: 1.55; }
+
 .saved-round { padding: 12px 0; border-top: 1px solid var(--border); }
 .saved-round:first-child { border-top: 0; padding-top: 0; }
 .saved-round header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }

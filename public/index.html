@@ -55,6 +55,19 @@
             </label>
           </div>
 
+          <label class="field" id="poolField" hidden>
+            <span>후보 번호 개수</span>
+            <select name="poolSize">
+              <option value="7">7개 (조합 7가지)</option>
+              <option value="8" selected>8개 (조합 28가지)</option>
+              <option value="9">9개 (조합 84가지)</option>
+              <option value="10">10개 (조합 210가지)</option>
+              <option value="12">12개 (조합 924가지)</option>
+            </select>
+          </label>
+
+          <p class="note small" id="jackpotNote" hidden></p>
+
           <label class="field" id="strengthField">
             <span>반영 강도 <output name="strengthOut">0.6</output></span>
             <input type="range" name="strength" min="0" max="1.5" step="0.1" value="0.6">
@@ -73,7 +86,7 @@
             <div class="checks" id="filters"></div>
           </fieldset>
 
-          <label class="check">
+          <label class="check" id="spreadField">
             <input type="checkbox" name="spread" checked>
             <span>게임끼리 겹치는 번호는 2개까지만 허용<small class="muted">번호가 고르게 퍼져서, 여러 게임 중 적어도 하나가 당첨될 확률이 가장 높아집니다</small></span>
           </label>
@@ -90,6 +103,7 @@
                 <button type="button" class="btn ghost small" id="btnSave" disabled>내 번호에 저장</button>
               </div>
             </div>
+            <div class="pool" id="poolInfo" hidden></div>
             <ol class="tickets" id="tickets"><li class="empty muted">왼쪽에서 전략을 고르고 <b>번호 생성</b>을 누르세요.</li></ol>
             <div class="odds" id="odds" hidden></div>
           </div>

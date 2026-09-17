@@ -47,13 +47,18 @@ function showTip(evt, html) {
 }
 const hideTip = () => tip && (tip.hidden = true);
 
+// 이보다 좁으면 여백을 빼고 남는 그림 영역이 음수가 된다. 실제 화면에서 나올 수 있는 너비보다 작게 잡는다.
+const MIN_RENDER_WIDTH = 160;
+
 /** 컨테이너 너비가 바뀌면 다시 그린다. */
 function responsive(container, draw) {
   container._viz?.disconnect();
   let lastWidth = 0;
   const render = () => {
     const w = Math.max(container.clientWidth, container._minWidth ?? 0);
-    if (w === lastWidth) return;
+    // 탭이 숨겨져 있거나 아직 배치 전이면 너비가 0에 가깝다. 이때는 그리지 않고,
+    // 보이게 되는 순간 ResizeObserver 가 다시 불러 준다.
+    if (w < MIN_RENDER_WIDTH || w === lastWidth) return;
     lastWidth = w;
     container.replaceChildren();
     draw(w);
