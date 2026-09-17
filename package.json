@@ -1,0 +1,16 @@
+{
+  "name": "lotto-gen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "로또 6/45 번호 생성기 — 역대 당첨 데이터 통계, 비인기 조합 전략, 전략 백테스트",
+  "scripts": {
+    "start": "node server.mjs",
+    "update": "node scripts/update-data.mjs",
+    "backtest": "node scripts/backtest.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

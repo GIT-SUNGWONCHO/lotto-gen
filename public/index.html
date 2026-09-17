@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>로또 번호 연구소</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%23fbc400'/><text x='16' y='21' font-size='14' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>45</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>로또 번호 연구소</h1>
+      <p class="muted" id="dataInfo">데이터 불러오는 중…</p>
+    </div>
+    <button type="button" class="btn ghost" id="btnUpdate">최신 회차 확인</button>
+  </header>
+
+  <section class="latest card" id="latest" aria-live="polite"></section>
+
+  <nav class="tabs" role="tablist" aria-label="메뉴">
+    <button role="tab" aria-selected="true" aria-controls="tab-gen" id="t-gen">번호 생성</button>
+    <button role="tab" aria-selected="false" aria-controls="tab-stats" id="t-stats">번호 통계</button>
+    <button role="tab" aria-selected="false" aria-controls="tab-backtest" id="t-backtest">전략 검증</button>
+    <button role="tab" aria-selected="false" aria-controls="tab-story" id="t-story">확률 이야기</button>
+  </nav>
+
+  <main>
+    <!-- 번호 생성 -->
+    <section class="panel" id="tab-gen" role="tabpanel" aria-labelledby="t-gen">
+      <div class="gen-grid">
+        <form class="card controls" id="genForm">
+          <fieldset>
+            <legend>전략</legend>
+            <div class="strategies" id="strategies"></div>
+          </fieldset>
+
+          <div class="row2">
+            <label class="field" id="windowField">
+              <span>'안 나온 번호' 기준 기간</span>
+              <select name="window">
+                <option value="0">전체 회차</option>
+                <option value="200">최근 200회</option>
+                <option value="100">최근 100회</option>
+                <option value="50">최근 50회</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>게임 수</span>
+              <select name="count">
+                <option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option>
+                <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="field" id="strengthField">
+            <span>반영 강도 <output name="strengthOut">0.6</output></span>
+            <input type="range" name="strength" min="0" max="1.5" step="0.1" value="0.6">
+            <small class="muted">0이면 무작위와 같고, 높을수록 전략 점수가 높은 번호에 몰립니다.</small>
+          </label>
+
+          <details class="picker">
+            <summary>번호 고정 · 제외 <span class="muted" id="pickSummary"></span></summary>
+            <p class="muted small">번호를 누를 때마다 <b>기본 → 고정 → 제외</b> 순서로 바뀝니다. 고정은 최대 5개입니다.</p>
+            <div class="num-grid" id="numGrid"></div>
+            <button type="button" class="btn link" id="btnClearPick">모두 해제</button>
+          </details>
+
+          <fieldset>
+            <legend>남들이 많이 고르는 패턴 빼기</legend>
+            <div class="checks" id="filters"></div>
+          </fieldset>
+
+          <label class="check">
+            <input type="checkbox" name="spread" checked>
+            <span>게임끼리 겹치는 번호는 2개까지만 허용<small class="muted">번호가 고르게 퍼져서, 여러 게임 중 적어도 하나가 당첨될 확률이 가장 높아집니다</small></span>
+          </label>
+
+          <button type="submit" class="btn primary">번호 생성</button>
+        </form>
+
+        <div class="stack">
+          <div class="card" id="resultCard">
+            <div class="card-head">
+              <h2 id="resultTitle">추천 번호</h2>
+              <div class="actions">
+                <button type="button" class="btn ghost small" id="btnCopy" disabled>복사</button>
+                <button type="button" class="btn ghost small" id="btnSave" disabled>내 번호에 저장</button>
+              </div>
+            </div>
+            <ol class="tickets" id="tickets"><li class="empty muted">왼쪽에서 전략을 고르고 <b>번호 생성</b>을 누르세요.</li></ol>
+            <div class="odds" id="odds" hidden></div>
+          </div>
+
+          <div class="card" id="savedCard">
+            <div class="card-head"><h2>내 번호</h2></div>
+            <div id="saved"><p class="muted">저장한 번호가 없습니다. 추첨이 끝나면 자동으로 당첨 여부를 확인합니다.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 번호 통계 -->
+    <section class="panel" id="tab-stats" role="tabpanel" aria-labelledby="t-stats" hidden>
+      <div class="tiles" id="tiles"></div>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h2>번호별 출현 횟수 − 기대값</h2>
+            <p class="muted small">파란 막대는 기대보다 적게 나온 번호, 빨간 막대는 많이 나온 번호입니다. 회색 띠는 순수한 우연으로 흔히 생기는 범위(±2σ)입니다.</p>
+          </div>
+          <select id="freqWindow" aria-label="기간">
+            <option value="0">전체 회차</option>
+            <option value="100">최근 100회</option>
+            <option value="30">최근 30회</option>
+          </select>
+        </div>
+        <div class="legend"><span><i class="sw neg"></i>기대보다 적게 나옴</span><span><i class="sw pos"></i>기대보다 많이 나옴</span><span><i class="sw band"></i>우연 범위 ±2σ</span></div>
+        <div class="viz-wrap" id="freqChart"></div>
+        <p class="verdict" id="freqVerdict"></p>
+        <details><summary>표로 보기</summary><div class="table-wrap" id="freqTable"></div></details>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h2>번호별 인기도 (다른 사람들이 얼마나 고르나)</h2>
+            <p class="muted small">그 번호가 당첨번호에 들어간 회차에 3·4개 일치 당첨자가 평균보다 몇 % 많았는지를 추정한 값입니다. 사람들이 많이 고르는 번호일수록 커집니다.</p>
+          </div>
+        </div>
+        <div class="legend"><span><i class="sw neg"></i>비인기 (당첨 시 나눠 갖는 사람 적음)</span><span><i class="sw pos"></i>인기</span></div>
+        <div class="viz-wrap" id="popChart"></div>
+        <p class="verdict" id="popVerdict"></p>
+        <details><summary>표로 보기</summary><div class="table-wrap" id="popTable"></div></details>
+      </article>
+    </section>
+
+    <!-- 전략 검증 -->
+    <section class="panel" id="tab-backtest" role="tabpanel" aria-labelledby="t-backtest" hidden>
+      <article class="card">
+        <h2>전략별 적중 수 백테스트</h2>
+        <p class="muted small" id="btMethod"></p>
+        <div class="viz-wrap" id="btChart"></div>
+        <p class="verdict" id="btVerdict"></p>
+        <details><summary>표로 보기</summary><div class="table-wrap" id="btTable"></div></details>
+      </article>
+
+      <article class="card">
+        <h2>조합 인기도별 1등 당첨자 수</h2>
+        <p class="muted small">당첨 조합을 인기도 점수로 다섯 구간으로 나누고, 실제 1등 당첨자 수를 '모두가 무작위로 샀을 때의 기대 인원'과 비교했습니다. 1.0보다 작을수록 1등 당첨금을 나눠 갖는 사람이 적습니다.</p>
+        <div class="legend"><span><i class="sw neg"></i>기대보다 적음</span><span><i class="sw pos"></i>기대보다 많음</span></div>
+        <div class="viz-wrap" id="payChart"></div>
+        <p class="verdict" id="payVerdict"></p>
+        <details><summary>표로 보기</summary><div class="table-wrap" id="payTable"></div></details>
+      </article>
+    </section>
+
+    <!-- 확률 이야기 -->
+    <section class="panel prose" id="tab-story" role="tabpanel" aria-labelledby="t-story" hidden>
+      <article class="card" id="story"></article>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    데이터 출처: 동행복권 당첨결과. 이 앱은 재미와 통계 학습용이며 당첨을 보장하지 않습니다. 로또의 기대 환급률은 약 50%입니다.
+  </footer>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
